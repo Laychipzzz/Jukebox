@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer components {
+  .auth-input {
+    width: 100%;
+    border-radius: 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    color: white;
+    transition: all 0.15s ease;
+  }
+  .auth-input::placeholder {
+    color: rgb(100, 116, 139);
+  }
+  .auth-input:focus {
+    outline: none;
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.5);
+  }
+}
+
+/* Seek / range bar */
+.seek-bar {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  background-image: linear-gradient(to right, rgb(16, 185, 129), rgb(16, 185, 129));
+  background-size: var(--pct, 0%) 100%;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+.seek-bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+  transition: transform 0.1s;
+}
+.seek-bar::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+.seek-bar:disabled::-webkit-slider-thumb {
+  background: rgb(100, 116, 139);
+}
+.seek-bar::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+}
+
+/* Now-playing equalizer bars */
+@keyframes eq {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+.animate-eq {
+  transform-origin: bottom;
+  animation: eq 800ms ease-in-out infinite;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
