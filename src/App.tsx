@@ -1,18 +1,10 @@
-import { useState, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth } from './lib/auth';
 import { AuthScreen } from './screens/AuthScreen';
 import { HomeScreen } from './screens/HomeScreen';
-import { RoomScreen } from './screens/RoomScreen';
-import { Loader2 } from 'lucide-react';
 
 function AppInner() {
   const { session, loading } = useAuth();
-  const [activeRoom, setActiveRoom] = useState<string | null>(null);
-
-  // Clear active room when user changes/logs out
-  useEffect(() => {
-    if (!session) setActiveRoom(null);
-  }, [session]);
 
   if (loading) {
     return (
@@ -22,15 +14,9 @@ function AppInner() {
     );
   }
 
-  if (!session) {
-    return <AuthScreen />;
-  }
+  if (!session) return <AuthScreen />;
 
-  if (activeRoom) {
-    return <RoomScreen roomId={activeRoom} onBack={() => setActiveRoom(null)} />;
-  }
-
-  return <HomeScreen onOpenRoom={(id) => setActiveRoom(id)} />;
+  return <HomeScreen />;
 }
 
 export default function App() {
