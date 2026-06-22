@@ -4,22 +4,22 @@ import {
   Plus,
   LogOut,
   Users,
-  ArrowRight,
   Loader2,
   AlertCircle,
   Hash,
   Lock,
   X,
+  ArrowRight,
+  ChevronDown,
 } from 'lucide-react';
-import { supabase, generateRoomCode, randomColor } from '../lib/supabase';
+import { supabase, generateRoomCode } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import { Avatar } from '../components/Avatar';
-import { formatRelativeTime } from '../lib/format';
-import type { Room, RoomMember, Profile } from '../lib/types';
+import type { Room, Profile } from '../lib/types';
 
 type JoinedRoom = {
   room: Room;
-  member: RoomMember;
+  role: string;
   memberCount: number;
 };
 
@@ -29,14 +29,16 @@ export function HomeScreen({ onOpenRoom }: { onOpenRoom: (roomId: string) => voi
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const loadRooms = useCallback(async () => {
     if (!profile) return;
     const { data, error } = await supabase
       .from('room_members')
-      .select(`room_id, joined_at, role, room:rooms(*), profile:profiles!room_members_user_id_fkey(*)`)
+      .select('room_id, joined_at, role, room:rooms(*)')
       .eq('user_id', profile.id)
-      .order('joined_at', { ascending: false });
+      .order('joined_at', { ascending: true });
+
     if (error) {
       console.error(error);
       setLoading(false);
@@ -51,18 +53,7 @@ export function HomeScreen({ onOpenRoom }: { onOpenRoom: (roomId: string) => voi
         .from('room_members')
         .select('*', { count: 'exact', head: true })
         .eq('room_id', room.id);
-      result.push({
-        room,
-        member: {
-          id: '',
-          room_id: room.id,
-          user_id: profile.id,
-          role: row.role,
-          joined_at: row.joined_at,
-          profile: row.profile as unknown as Profile,
-        },
-        memberCount: count ?? 0,
-      });
+      result.push({ room, role: row.role, memberCount: count ?? 0 });
     }
     setRooms(result);
     setLoading(false);
@@ -72,134 +63,152 @@ export function HomeScreen({ onOpenRoom }: { onOpenRoom: (roomId: string) => voi
     loadRooms();
   }, [loadRooms]);
 
+  // Realtime: watch for membership changes
+  useEffect(() => {
+    if (!profile) return;
+    const channel = supabase
+      .channel(`home_members:${profile.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'room_members', filter: `user_id=eq.${profile.id}` },
+        () => loadRooms()
+      )
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [profile, loadRooms]);
+
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      {/* Header */}
-      <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 shadow-lg shadow-emerald-500/30">
-              <Music className="h-5 w-5 text-white" strokeWidth={2.5} />
-            </div>
-            <span className="text-lg font-bold">Jukebox</span>
+    <div className="flex h-screen bg-slate-950 text-white overflow-hidden">
+      {/* Sidebar */}
+      <aside className="flex w-16 flex-col items-center gap-2 border-r border-white/10 bg-slate-950 py-3 sm:w-[240px] sm:items-stretch sm:px-3">
+        {/* Logo */}
+        <div className="mb-1 flex h-10 items-center gap-2.5 px-1 sm:px-0">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 shadow-lg shadow-emerald-500/30">
+            <Music className="h-5 w-5 text-white" strokeWidth={2.5} />
           </div>
-          <div className="flex items-center gap-3">
+          <span className="hidden text-base font-bold sm:block">Jukebox</span>
+        </div>
+
+        {/* Divider */}
+        <div className="mx-auto mb-1 h-px w-8 bg-white/10 sm:w-full" />
+
+        {/* Room list */}
+        <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+            </div>
+          ) : rooms.length === 0 ? (
+            <p className="hidden px-1 text-xs text-slate-600 sm:block">No rooms yet.</p>
+          ) : (
+            rooms.map(({ room, role, memberCount }) => (
+              <SidebarRoom
+                key={room.id}
+                room={room}
+                role={role}
+                memberCount={memberCount}
+                onClick={() => onOpenRoom(room.id)}
+              />
+            ))
+          )}
+        </div>
+
+        {/* Add / Join buttons */}
+        <div className="mt-auto flex flex-col gap-1">
+          <SidebarAction
+            icon={<Hash className="h-4 w-4" />}
+            label="Join a room"
+            onClick={() => setShowJoin(true)}
+          />
+          <SidebarAction
+            icon={<Plus className="h-4 w-4" />}
+            label="Create a room"
+            onClick={() => setShowCreate(true)}
+            accent
+          />
+        </div>
+
+        {/* Divider */}
+        <div className="mx-auto my-1 h-px w-8 bg-white/10 sm:w-full" />
+
+        {/* User strip */}
+        <div className="relative">
+          <button
+            onClick={() => setShowUserMenu((v) => !v)}
+            className="flex w-full items-center gap-2 rounded-xl p-2 text-left transition hover:bg-white/5"
+          >
             {profile && (
-              <div className="flex items-center gap-2">
+              <>
                 <Avatar
                   username={profile.username}
                   avatarUrl={profile.avatar_url}
                   color={profile.avatar_color}
-                  size={34}
+                  size={32}
                 />
-                <span className="hidden text-sm font-medium text-slate-300 sm:inline">
-                  {profile.username}
-                </span>
-              </div>
+                <div className="hidden min-w-0 flex-1 sm:block">
+                  <p className="truncate text-sm font-medium">{profile.username}</p>
+                </div>
+                <ChevronDown className="hidden h-3.5 w-3.5 shrink-0 text-slate-500 sm:block" />
+              </>
             )}
-            <button
-              onClick={signOut}
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 text-slate-400 transition hover:bg-white/10 hover:text-white"
-              title="Log out"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </header>
+          </button>
 
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {/* Hero */}
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold sm:text-3xl">
-              Hey, {profile?.username}
-            </h1>
-            <p className="mt-1 text-sm text-slate-400">
-              {rooms.length === 0
-                ? 'Join or create a room to start listening.'
-                : `${rooms.length} ${rooms.length === 1 ? 'room' : 'rooms'} you're in.`}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowJoin(true)}
-              className="flex items-center gap-2 rounded-xl bg-white/5 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/10"
-            >
-              <Hash className="h-4 w-4" />
-              Join
-            </button>
-            <button
-              onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:brightness-110"
-            >
-              <Plus className="h-4 w-4" />
-              Create room
-            </button>
-          </div>
+          {showUserMenu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
+              <div className="absolute bottom-full left-0 right-0 z-50 mb-1 overflow-hidden rounded-xl border border-white/10 bg-slate-900 py-1 shadow-2xl">
+                <button
+                  onClick={() => { setShowUserMenu(false); signOut(); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/5"
+                >
+                  <LogOut className="h-4 w-4 text-slate-400" />
+                  Log out
+                </button>
+              </div>
+            </>
+          )}
         </div>
+      </aside>
 
-        {/* Rooms grid */}
-        {loading ? (
-          <div className="flex items-center justify-center py-20 text-slate-500">
-            <Loader2 className="h-6 w-6 animate-spin" />
-          </div>
-        ) : rooms.length === 0 ? (
-          <EmptyState onCreate={() => setShowCreate(true)} onJoin={() => setShowJoin(true)} />
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {rooms.map(({ room, member, memberCount }) => (
-              <button
-                key={room.id}
-                onClick={() => onOpenRoom(room.id)}
-                className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-left transition hover:border-white/20 hover:bg-white/[0.05]"
-              >
-                <div
-                  className="absolute -right-8 -top-8 h-24 w-24 rounded-full opacity-20 blur-2xl transition group-hover:opacity-40"
-                  style={{ background: randomColor() }}
-                />
-                <div className="relative flex items-center justify-between">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400/20 to-cyan-500/20 text-emerald-400">
-                    <Music className="h-6 w-6" />
-                  </div>
-                  {member.role === 'owner' && (
-                    <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-xs font-medium text-amber-400">
-                      Owner
-                    </span>
-                  )}
-                </div>
-                <div className="relative">
-                  <h3 className="truncate font-semibold">{room.name}</h3>
-                  <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-400">
-                    <Hash className="h-3 w-3" />
-                    <span className="font-mono">{room.code}</span>
-                    <span className="text-slate-600">·</span>
-                    <Users className="h-3 w-3" />
-                    <span>{memberCount}</span>
-                    <span className="text-slate-600">·</span>
-                    <span>{formatRelativeTime(member.joined_at)}</span>
-                  </div>
-                </div>
-                <div className="relative flex items-center justify-between pt-1">
-                  <span className="text-xs text-slate-500">
-                    {room.playing ? 'Now playing' : 'Idle'}
-                  </span>
-                  <ArrowRight className="h-4 w-4 text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-white" />
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+      {/* Main content — always shows the splash / landing since no room is selected */}
+      <main className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+        <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400/20 to-cyan-500/20 text-emerald-400">
+          <Music className="h-10 w-10" />
+        </div>
+        <h1 className="text-2xl font-bold sm:text-3xl">
+          {rooms.length === 0 ? 'Welcome to Jukebox' : 'Pick a room'}
+        </h1>
+        <p className="mt-2 max-w-sm text-sm text-slate-400">
+          {rooms.length === 0
+            ? 'Create a room or join one with a code to start listening with others.'
+            : 'Select a room from the sidebar, or join another one with a code.'}
+        </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <button
+            onClick={() => setShowJoin(true)}
+            className="flex items-center gap-2 rounded-xl bg-white/5 px-5 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+          >
+            <Hash className="h-4 w-4" /> Join a room
+          </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:brightness-110"
+          >
+            <Plus className="h-4 w-4" /> Create a room
+          </button>
+        </div>
       </main>
 
       {showCreate && (
         <CreateRoomModal
+          profile={profile}
           onClose={() => setShowCreate(false)}
           onCreated={(id) => { setShowCreate(false); onOpenRoom(id); }}
         />
       )}
       {showJoin && (
         <JoinRoomModal
+          profile={profile}
           onClose={() => setShowJoin(false)}
           onJoined={(id) => { setShowJoin(false); onOpenRoom(id); }}
         />
@@ -208,36 +217,93 @@ export function HomeScreen({ onOpenRoom }: { onOpenRoom: (roomId: string) => voi
   );
 }
 
-function EmptyState({ onCreate, onJoin }: { onCreate: () => void; onJoin: () => void }) {
+function SidebarRoom({
+  room,
+  role,
+  memberCount,
+  onClick,
+}: {
+  room: Room;
+  role: string;
+  memberCount: number;
+  onClick: () => void;
+}) {
+  const initials = room.name.slice(0, 2).toUpperCase();
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-16 text-center">
-      <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400/10 to-cyan-500/10 text-emerald-400">
-        <Music className="h-8 w-8" />
+    <button
+      onClick={onClick}
+      className="group flex w-full items-center gap-2.5 rounded-xl px-1 py-2 text-left transition hover:bg-white/5 sm:px-2"
+      title={room.name}
+    >
+      {/* Icon/avatar for the room */}
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-700 to-slate-800 text-sm font-bold text-slate-300 transition group-hover:from-emerald-500/20 group-hover:to-cyan-500/20 group-hover:text-emerald-400">
+        {initials}
       </div>
-      <h3 className="text-lg font-semibold">No rooms yet</h3>
-      <p className="mt-1 max-w-xs text-sm text-slate-400">
-        Create a room and invite friends with the code, or join an existing one.
-      </p>
-      <div className="mt-6 flex gap-2">
-        <button
-          onClick={onJoin}
-          className="flex items-center gap-2 rounded-xl bg-white/5 px-4 py-2 text-sm font-medium transition hover:bg-white/10"
-        >
-          <Hash className="h-4 w-4" /> Join
-        </button>
-        <button
-          onClick={onCreate}
-          className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:brightness-110"
-        >
-          <Plus className="h-4 w-4" /> Create room
-        </button>
+      <div className="hidden min-w-0 flex-1 sm:block">
+        <p className="truncate text-sm font-medium text-slate-200">{room.name}</p>
+        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+          <Users className="h-3 w-3" />
+          <span>{memberCount}</span>
+          {role === 'owner' && (
+            <>
+              <span>·</span>
+              <span className="text-amber-500/80">Owner</span>
+            </>
+          )}
+          {room.playing && (
+            <>
+              <span>·</span>
+              <span className="text-emerald-500">Playing</span>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </button>
   );
 }
 
-function CreateRoomModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
-  const { profile } = useAuth();
+function SidebarAction({
+  icon,
+  label,
+  onClick,
+  accent,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  accent?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className={`flex w-full items-center gap-2.5 rounded-xl px-1 py-2 text-left text-sm font-medium transition sm:px-2 ${
+        accent
+          ? 'text-emerald-400 hover:bg-emerald-500/10'
+          : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+      }`}
+    >
+      <div
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+          accent ? 'bg-emerald-500/10' : 'bg-white/5'
+        }`}
+      >
+        {icon}
+      </div>
+      <span className="hidden sm:block">{label}</span>
+    </button>
+  );
+}
+
+function CreateRoomModal({
+  profile,
+  onClose,
+  onCreated,
+}: {
+  profile: Profile | null;
+  onClose: () => void;
+  onCreated: (id: string) => void;
+}) {
   const [name, setName] = useState('');
   const [code, setCode] = useState(generateRoomCode());
   const [usePasscode, setUsePasscode] = useState(false);
@@ -252,7 +318,6 @@ function CreateRoomModal({ onClose, onCreated }: { onClose: () => void; onCreate
     setLoading(true);
     setError(null);
     try {
-      // Create room
       const { data: room, error: roomErr } = await supabase
         .from('rooms')
         .insert({
@@ -266,7 +331,6 @@ function CreateRoomModal({ onClose, onCreated }: { onClose: () => void; onCreate
       if (roomErr) throw roomErr;
       if (!room) throw new Error('Failed to create room.');
 
-      // Add owner as member
       const { error: memErr } = await supabase
         .from('room_members')
         .insert({ room_id: room.id, user_id: profile.id, role: 'owner' });
@@ -275,7 +339,6 @@ function CreateRoomModal({ onClose, onCreated }: { onClose: () => void; onCreate
       onCreated(room.id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create room.';
-      // Code collision? Regenerate.
       if (msg.toLowerCase().includes('code')) setCode(generateRoomCode());
       setError(msg);
       setLoading(false);
@@ -285,8 +348,7 @@ function CreateRoomModal({ onClose, onCreated }: { onClose: () => void; onCreate
   return (
     <ModalShell onClose={onClose} title="Create a room">
       <form onSubmit={submit} className="space-y-4">
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">Room name</span>
+        <Field label="Room name">
           <input
             autoFocus
             type="text"
@@ -297,10 +359,9 @@ function CreateRoomModal({ onClose, onCreated }: { onClose: () => void; onCreate
             maxLength={40}
             required
           />
-        </label>
+        </Field>
 
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">Room code</span>
+        <Field label="Room code">
           <div className="flex gap-2">
             <input
               type="text"
@@ -318,7 +379,7 @@ function CreateRoomModal({ onClose, onCreated }: { onClose: () => void; onCreate
               Shuffle
             </button>
           </div>
-        </label>
+        </Field>
 
         <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
           <label className="flex items-center gap-2.5">
@@ -364,8 +425,15 @@ function CreateRoomModal({ onClose, onCreated }: { onClose: () => void; onCreate
   );
 }
 
-function JoinRoomModal({ onClose, onJoined }: { onClose: () => void; onJoined: (id: string) => void }) {
-  const { profile } = useAuth();
+function JoinRoomModal({
+  profile,
+  onClose,
+  onJoined,
+}: {
+  profile: Profile | null;
+  onClose: () => void;
+  onJoined: (id: string) => void;
+}) {
   const [code, setCode] = useState('');
   const [passcode, setPasscode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -385,12 +453,19 @@ function JoinRoomModal({ onClose, onJoined }: { onClose: () => void; onJoined: (
         .maybeSingle();
       if (findErr) throw findErr;
       if (!room) throw new Error('No room with that code.');
-      if (room.passcode && room.passcode !== passcode) {
-        setNeedsPasscode(true);
-        throw new Error('Wrong passcode.');
+
+      if (room.passcode) {
+        if (!passcode) {
+          setNeedsPasscode(true);
+          setLoading(false);
+          return;
+        }
+        if (room.passcode !== passcode) {
+          setNeedsPasscode(true);
+          throw new Error('Incorrect passcode.');
+        }
       }
 
-      // Check if already a member
       const { data: existing } = await supabase
         .from('room_members')
         .select('id')
@@ -414,23 +489,21 @@ function JoinRoomModal({ onClose, onJoined }: { onClose: () => void; onJoined: (
   return (
     <ModalShell onClose={onClose} title="Join a room">
       <form onSubmit={submit} className="space-y-4">
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">Room code</span>
+        <Field label="Room code">
           <input
             autoFocus
             type="text"
             value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 6))}
+            onChange={(e) => { setCode(e.target.value.toUpperCase().slice(0, 6)); setNeedsPasscode(false); setError(null); }}
             placeholder="ABC123"
-            className="auth-input text-center font-mono text-lg uppercase tracking-[0.3em]"
+            className="auth-input text-center font-mono text-xl uppercase tracking-[0.4em]"
             maxLength={6}
             required
           />
-        </label>
+        </Field>
 
         {needsPasscode && (
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">Passcode</span>
+          <Field label="Passcode">
             <input
               type="text"
               value={passcode}
@@ -438,9 +511,8 @@ function JoinRoomModal({ onClose, onJoined }: { onClose: () => void; onJoined: (
               placeholder="Enter the passcode"
               className="auth-input"
               autoFocus
-              required
             />
-          </label>
+          </Field>
         )}
 
         {error && <ErrorBox msg={error} />}
@@ -471,6 +543,15 @@ function ModalShell({ children, onClose, title }: { children: React.ReactNode; o
         {children}
       </div>
     </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400">{label}</span>
+      {children}
+    </label>
   );
 }
 
